@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoLayer 3D - ULPIN Generator</title>
+    
+    <!-- Mapbox & Tailwind External Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
+    
+    <!-- Your Custom CSS File -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-gray-900 h-screen flex flex-col">
+    <!-- Navbar -->
+    <nav class="bg-slate-900/90 backdrop-blur-md text-white p-4 border-b border-slate-700 flex justify-between items-center z-10 shadow-lg relative">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/50">GL</div>
+            <h1 class="text-xl font-bold tracking-wide">GeoLayer 3D <span class="text-blue-400 text-xs ml-2 uppercase tracking-wider">SIH26011</span></h1>
+        </div>
+        <div class="bg-slate-800 border border-slate-600 px-4 py-1.5 rounded-full text-xs font-semibold text-slate-300">
+            Dept. of Land Resources (DILRMP)
+        </div>
+    </nav>
+
+    <div class="flex flex-1 relative">
+        <div id="map" class="w-full h-full absolute inset-0"></div>
+
+        <!-- Glassmorphism Panel (Top Left) -->
+        <div class="absolute top-6 left-6 bg-white/80 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-80 z-10 border border-white/50 transition-all hover:shadow-blue-500/20 hover:-translate-y-1">
+            <div class="flex items-center gap-2 mb-2">
+                <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <h2 class="text-lg font-bold text-slate-800">3D Parcel Inspector</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-5 leading-relaxed">Select any building geometry to calculate volumetric data and generate a 14-digit ULPIN.</p>
+            
+            <div class="bg-slate-50/80 p-4 rounded-xl border border-slate-200 mb-4 shadow-inner">
+                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Spatial Data (X, Y, Z)</p>
+                <p id="coord-display" class="text-sm text-slate-700 font-mono leading-relaxed">Awaiting selection...</p>
+            </div>
+
+            <div class="bg-blue-50/80 p-4 rounded-xl border border-blue-200 shadow-inner">
+                <p class="text-[10px] text-blue-600 uppercase font-bold tracking-wider mb-1">14-Digit 3D ULPIN</p>
+                <p id="ulpin-display" class="text-lg text-blue-700 font-mono font-bold tracking-widest transition-colors duration-300">---- ---- ----</p>
+            </div>
+        </div>
+
+        <!-- Team Watermark (Bottom Left) -->
+        <div class="absolute bottom-6 left-6 bg-slate-900/90 backdrop-blur-xl text-white px-4 py-3 rounded-xl z-10 border border-slate-700 shadow-2xl flex items-center gap-2 text-xs">
+            <div class="w-2 h-2 bg-blue-400 rounded-full animate-ping"></div>
+            <div>
+                <span class="text-slate-400">Created by:</span> 
+                <span class="font-bold tracking-wide text-blue-400">TEAM - THE DEBUGGERS</span>
+                <span class="text-slate-500 mx-1">|</span>
+                <span class="text-slate-400">Updated: Sep 2026</span>
+            </div>
+        </div>
+
+        <!-- AI Assistant Panel (Bottom Right) -->
+        <div class="absolute bottom-6 right-6 bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl w-80 z-10 border border-white/50 flex flex-col overflow-hidden transition-all hover:shadow-purple-500/20">
+            <div class="bg-slate-900 p-3 text-white flex justify-between items-center">
+                <span class="font-semibold text-sm flex items-center gap-2">
+                    <span class="text-purple-400">✨</span> Land Records Assistant
+                </span>
+            </div>
+            <div id="chat-history" class="h-48 p-4 overflow-y-auto text-sm text-slate-700 space-y-3 bg-slate-50/50">
+                <div class="bg-slate-200/70 p-2 rounded-lg rounded-tl-none w-11/12">Hello! Click a building, and ask me to analyze its ULPIN or property details.</div>
+            </div>
+            <div class="p-3 border-t border-slate-200 bg-white flex gap-2">
+                <input type="text" id="ai-input" placeholder="Ask about this property..." class="flex-1 bg-slate-100 text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-400 border border-slate-200 transition-all">
+                <button id="ai-send" class="bg-slate-900 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-purple-600 transition-colors">Ask</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
