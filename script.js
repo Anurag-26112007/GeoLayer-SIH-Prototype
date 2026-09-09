@@ -1,4 +1,4 @@
-// 1. Mapbox Token
+// 1. Mapbox Token - REMINDER: Ensure this is a secure, active token before your demo!
 mapboxgl.accessToken = 'pk.eyJ1IjoiZXJpY25pbmciLCJhIjoiY21icXlubWM1MDRiczJvb2xwM2p0amNyayJ9.n-3O6JI5nOp_Lw96ZO5vJQ';
 
 // Global variables to give the Assistant context about what you click
@@ -9,12 +9,31 @@ let currentFloors = 0;
 const map = new mapboxgl.Map({
     container: 'map',
     style: 'mapbox://styles/mapbox/light-v11', 
-    center: [80.9462, 26.8467], // Lucknow Coordinates
+    center: [80.9462, 26.8467], // Default to Lucknow Coordinates
     zoom: 16,
     pitch: 45, 
     bearing: -17.6, 
     antialias: true
 });
+
+// Add Search Bar (Geocoder) to Top-Right
+const geocoder = new MapboxGeocoder({
+    accessToken: mapboxgl.accessToken,
+    mapboxgl: mapboxgl,
+    marker: false, 
+    placeholder: 'Search for a city or region...'
+});
+map.addControl(geocoder, 'top-right');
+
+// Add Current Location Button (Geolocate) to Top-Right
+const geolocate = new mapboxgl.GeolocateControl({
+    positionOptions: {
+        enableHighAccuracy: true
+    },
+    trackUserLocation: true,
+    showUserHeading: true
+});
+map.addControl(geolocate, 'top-right');
 
 map.on('style.load', () => {
     const layers = map.getStyle().layers;
@@ -45,7 +64,8 @@ map.on('click', (e) => {
     const lng = e.lngLat.lng.toFixed(4);
     const lat = e.lngLat.lat.toFixed(4);
     
-    currentFloors = Math.floor(Math.random() * 8) + 2; 
+    // Generates a random floor count between -2 (basement) and 8 (upper floors)
+    currentFloors = Math.floor(Math.random() * 11) - 2; 
     const heightZ = currentFloors * 3; 
     
     currentSpatialData = `X: ${lng}, Y: ${lat}, Z: ${heightZ}m (${currentFloors} floors)`;
@@ -125,7 +145,19 @@ function processAIAssistant(question) {
         } else if (q.includes('dispute') || q.includes('court')) {
             responseText = `Legal Verification for ULPIN ${currentUlpin}: Zero litigation flags or encumbrances found in district court records.`;
         } else {
-            responseText = `Property Analysis [${currentUlpin}]: Volumetric structure verified with ${currentFloors} floors mapped via 3D spatial geometry. Title deed is fully authenticated under DILRMP guidelines.`;
+            // Generate a random number to simulate varied DILRMP authentication statuses
+            const randomStatus = Math.random(); 
+            
+            if (randomStatus > 0.8) {
+                // 20% chance to fail
+                responseText = `Property Analysis [${currentUlpin}]: ⚠️ ALERT - Title deed is NOT AUTHENTICATED under DILRMP guidelines. Vertical property dispute detected on floor ${currentFloors}.`;
+            } else if (randomStatus > 0.6) {
+                // 20% chance to be pending
+                responseText = `Property Analysis [${currentUlpin}]: ⏳ Status PENDING. Awaiting physical verification of ${currentFloors} floors for DILRMP registry.`;
+            } else {
+                // 60% chance to pass perfectly
+                responseText = `Property Analysis [${currentUlpin}]: ✅ Volumetric structure verified with ${currentFloors} floors mapped via 3D spatial geometry. Title deed is fully authenticated under DILRMP guidelines.`;
+            }
         }
 
         appendMessage('ai', responseText);
