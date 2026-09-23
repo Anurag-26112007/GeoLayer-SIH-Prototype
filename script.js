@@ -49,7 +49,7 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 const state = {
     styleKey: 'light',
     selected: null,   // current parcel record
-    floor: null,      // null = whole building, 1..n above ground, -1..-n basements
+    floor: null,      // null = whole building, 1..n above ground, -1..n basements
     voiceLang: lsGet('gl.voiceLang', 'en-IN'),
     readAloud: lsGet('gl.readAloud', '0') === '1'
 };
@@ -62,7 +62,7 @@ const state = {
 // ---------------------------------------------------------------------------
 function toRow(r) {
     return {
-        ulpin: r.ulpin, lng: r.lng, lat: r.lat,
+        ulpin: r.ulpin, floor_ulpins: r.floorUlpins, lng: r.lng, lat: r.lat,
         height_m: r.heightM, min_height_m: r.minHeightM, depth_m: r.depthM,
         floors_above: r.floorsAbove, floors_below: r.floorsBelow,
         footprint_m2: r.footprintM2, volume_m3: r.volumeM3,
@@ -74,7 +74,7 @@ function toRow(r) {
 
 function fromRow(row) {
     return {
-        v: 1, ulpin: row.ulpin, lng: row.lng, lat: row.lat,
+        v: 1, ulpin: row.ulpin, floorUlpins: row.floor_ulpins || {}, lng: row.lng, lat: row.lat,
         heightM: row.height_m, minHeightM: row.min_height_m, depthM: row.depth_m,
         floorsAbove: row.floors_above, floorsBelow: row.floors_below,
         footprintM2: row.footprint_m2, volumeM3: row.volume_m3,
@@ -415,10 +415,22 @@ function buildRecord(feature) {
 
     let digits = '';
     for (let i = 0; i < 12; i++) digits += Math.floor(rng() * 10);
+    const baseUlpin = STATE_CODE + digits;
+
+    // Generate a unique 14-digit ULPIN for EVERY floor
+    const floorUlpins = {};
+    for (let k = -basements; k <= floorsAbove; k++) {
+        if (k === 0) continue;
+        const fRng = mulberry32(hashString(`${lng.toFixed(4)}|${lat.toFixed(4)}|floor${k}`));
+        let fDigits = '';
+        for (let i = 0; i < 12; i++) fDigits += Math.floor(fRng() * 10);
+        floorUlpins[k] = STATE_CODE + fDigits;
+    }
 
     return {
         v: 1,
-        ulpin: STATE_CODE + digits,
+        ulpin: baseUlpin,
+        floorUlpins, 
         lng, lat,
         heightM, minHeightM, depthM,
         floorsAbove, floorsBelow: basements,
@@ -548,6 +560,18 @@ function clearSelection() {
     refreshRegistryUI();
 }
 
+function updateUlpinDisplay() {
+    const rec = state.selected;
+    const ulpinEl = $('ulpin-display');
+    if (!rec) return;
+
+    if (state.floor !== null && rec.floorUlpins && rec.floorUlpins[state.floor]) {
+        ulpinEl.innerHTML = `${formatUlpin(rec.floorUlpins[state.floor])} <span style="font-size: 14px; color: var(--muted); font-family: var(--font-ui);">(${floorCode(state.floor)})</span>`;
+    } else {
+        ulpinEl.textContent = formatUlpin(rec.ulpin);
+    }
+}
+
 function setFloor(f) {
     if (!state.selected) return;
     const valid = floorList(state.selected);
@@ -555,6 +579,7 @@ function setFloor(f) {
     syncMapSelection();
     renderStrip(state.selected);
     renderFloor();
+    updateUlpinDisplay();
 }
 
 function locate(rec, floor = null) {
@@ -731,21 +756,37 @@ function lookup(raw) {
     }
 
     if (digits.length === 14) {
-        const rec = DB.get(digits);
+        let foundFloor = null;
+        let rec = DB.get(digits);
+
+        if (!rec) {
+            rec = DB.all().find(r => r.floorUlpins && Object.values(r.floorUlpins).includes(digits));
+            if (rec) {
+                foundFloor = parseInt(Object.keys(rec.floorUlpins).find(k => rec.floorUlpins[k] === digits), 10);
+            }
+        }
+
         if (!rec) {
             showLookupMsg(`ULPIN ${formatUlpin(digits)} is not in the registry yet. Fly to the area and`, 'error', true);
             return false;
         }
-        const sel = locate(rec, floor);
-        if (floor !== null && !floorList(sel).includes(floor)) {
-            showLookupMsg(`Found the building, but it has no ${floorLabel(floor).toLowerCase()}. It has ${sel.floorsAbove} floors above ground and ${sel.floorsBelow} basement level${sel.floorsBelow === 1 ? '' : 's'}.`, 'error');
+
+        const selFloor = foundFloor !== null ? foundFloor : floor;
+        const sel = locate(rec, selFloor);
+
+        if (selFloor !== null && !floorList(sel).includes(selFloor)) {
+            showLookupMsg(`Found the building, but it has no ${floorLabel(selFloor).toLowerCase()}.`, 'error');
         } else {
-            showLookupMsg(floor !== null ? `Found ${floorLabel(floor).toLowerCase()} of ${formatUlpin(digits)}.` : `Found ${formatUlpin(digits)}.`);
+            showLookupMsg(selFloor !== null ? `Found ${floorLabel(selFloor).toLowerCase()} of property.` : `Found property.`);
         }
         return true;
     }
 
-    const matches = DB.all().filter((r) => r.ulpin.includes(digits)).slice(0, 6);
+    const matches = DB.all().filter((r) => 
+        r.ulpin.includes(digits) || 
+        (r.floorUlpins && Object.values(r.floorUlpins).some(fu => fu.includes(digits)))
+    ).slice(0, 6);
+    
     if (!matches.length) {
         showLookupMsg(`No registry entries contain ${digits}.`, 'error', true);
         return false;
@@ -865,7 +906,7 @@ function renderRecord() {
         return;
     }
 
-    ulpinEl.textContent = formatUlpin(rec.ulpin);
+    updateUlpinDisplay();
     ulpinEl.classList.remove('is-empty');
     ulpinEl.classList.add('flash');
     requestAnimationFrame(() => requestAnimationFrame(() => ulpinEl.classList.remove('flash')));
@@ -876,8 +917,7 @@ function renderRecord() {
     renderFloorSelect(rec);
     renderFloor();
 
-    $('sp-place').textContent = rec.place || '-';
-    $('sp-footprint').textContent = `${nf.format(rec.footprintM2)} m\u00B2`;
+    $('sp-place').textContent = rec.place \vert{}\vert{} '-';$('sp-footprint').textContent = `${nf.format(rec.footprintM2)} m\u00B2`;
     $('sp-height').textContent = `${nf1.format(rec.heightM)} m`;
     $('sp-depth').textContent = rec.depthM ? `${rec.depthM} m` : 'None';
     $('sp-floors').textContent = `${rec.floorsAbove} above, ${rec.floorsBelow} below`;
@@ -909,8 +949,7 @@ function stepFloor(dir) {
     const i = list.indexOf(state.floor) + dir;
     if (i >= 0 && i < list.length) setFloor(list[i]);
 }
-$('floor-up').addEventListener('click', () => stepFloor(1));
-$('floor-down').addEventListener('click', () => stepFloor(-1));
+$('floor-up').addEventListener('click', () => stepFloor(1));$('floor-down').addEventListener('click', () => stepFloor(-1));
 
 // Note, star, copy ---------------------------------------------------------
 const saveNote = debounce(() => {
@@ -926,8 +965,7 @@ $('star-btn').addEventListener('click', () => {
     if (!r) return;
     r.starred = !r.starred;
     DB.put(r);
-    $('star-btn').setAttribute('aria-pressed', String(r.starred));
-    $('star-btn').textContent = r.starred ? 'Starred' : 'Star';
+    $('star-btn').setAttribute('aria-pressed', String(r.starred));$('star-btn').textContent = r.starred ? 'Starred' : 'Star';
     refreshRegistryUI();
 });
 
@@ -940,7 +978,8 @@ async function copyText(text, btn, doneLabel) {
 
 function exportShape(r) {
     return {
-        ulpin: r.ulpin,
+        buildingUlpin: r.ulpin,
+        floorUlpins: r.floorUlpins || {},
         place: r.place || null,
         centroid: { x: +r.lng.toFixed(5), y: +r.lat.toFixed(5) },
         heightAboveGroundM: r.heightM,
@@ -956,11 +995,15 @@ function exportShape(r) {
     };
 }
 
-$('copy-ulpin').addEventListener('click', (e) => { if (state.selected) copyText(state.selected.ulpin, e.currentTarget, 'Copied'); });
-$('copy-record').addEventListener('click', (e) => {
-    if (state.selected) copyText(JSON.stringify(exportShape(state.selected), null, 2), e.currentTarget, 'Copied');
+$('copy-ulpin').addEventListener('click', (e) => { 
+    if (!state.selected) return;
+    const textToCopy = (state.floor !== null && state.selected.floorUlpins && state.selected.floorUlpins[state.floor]) 
+        ? state.selected.floorUlpins[state.floor] 
+        : state.selected.ulpin;
+    copyText(textToCopy, e.currentTarget, 'Copied');
 });
-$('clear-btn').addEventListener('click', clearSelection);
+
+$('copy-record').addEventListener('click', (e) => {     if (state.selected) copyText(JSON.stringify(exportShape(state.selected), null, 2), e.currentTarget, 'Copied'); });$('clear-btn').addEventListener('click', clearSelection);
 
 // Map style switcher -------------------------------------------------------
 document.querySelectorAll('.style-switch button').forEach((btn) => {
@@ -1047,11 +1090,9 @@ function renderRegistryTable() {
     });
 }
 
-$('open-registry').addEventListener('click', () => { renderRegistryTable(); dlg.showModal(); });
-$('registry-close').addEventListener('click', () => dlg.close());
+$('open-registry').addEventListener('click', () => { renderRegistryTable(); dlg.showModal(); });$('registry-close').addEventListener('click', () => dlg.close());
 dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
-$('registry-filter').addEventListener('input', renderRegistryTable);
-$('registry-starred').addEventListener('change', renderRegistryTable);
+$('registry-filter').addEventListener('input', renderRegistryTable);$('registry-starred').addEventListener('change', renderRegistryTable);
 
 $('registry-body').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-act]');
@@ -1239,8 +1280,7 @@ function handleCommand(text) {
 }
 
 $('mic-global').addEventListener('click', (e) => startVoice('global', e.currentTarget));
-$('mic-lookup').addEventListener('click', (e) => startVoice('lookup', e.currentTarget));
-$('mic-assistant').addEventListener('click', (e) => startVoice('assistant', e.currentTarget));
+$('mic-lookup').addEventListener('click', (e) => startVoice('lookup', e.currentTarget));$('mic-assistant').addEventListener('click', (e) => startVoice('assistant', e.currentTarget));
 
 function renderVoiceLang() {
     const hi = state.voiceLang === 'hi-IN';
@@ -1299,9 +1339,10 @@ function answer(question, r) {
         }
         setFloor(f);
         const info = floorInfo(r, f);
-        return `${floorLabel(f)} of ULPIN ${id}: ${info.use.toLowerCase()}, about ${nf(info.area)} m\u00B2` +
+        const fUlpin = (r.floorUlpins && r.floorUlpins[f]) ? formatUlpin(r.floorUlpins[f]) : id;
+        return `${floorLabel(f)} has its own unique ULPIN: ${fUlpin}. It is ${info.use.toLowerCase()}, about ${nf(info.area)} m\u00B2` +
             (info.units ? `, roughly ${info.units} unit${info.units === 1 ? '' : 's'}` : '') +
-            `. Unit reference ${info.ref}. It is now highlighted on the map.`;
+            `. It is now highlighted on the map.`;
     }
 
     if (has('registry', 'database', 'indexed', 'how many parcels')) {
@@ -1370,8 +1411,7 @@ function ask(question) {
     }, 450);
 }
 
-$('ai-form').addEventListener('submit', (e) => { e.preventDefault(); ask(aiInput.value); });
-$('chips').addEventListener('click', (e) => {
+$('ai-form').addEventListener('submit', (e) => { e.preventDefault(); ask(aiInput.value); });$('chips').addEventListener('click', (e) => {
     const chip = e.target.closest('button[data-q]');
     if (chip) ask(chip.dataset.q);
 });
