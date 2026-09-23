@@ -14,7 +14,8 @@ mapboxgl.accessToken = 'pk.eyJ1IjoiZXJpY25pbmciLCJhIjoiY21icXlubWM1MDRiczJvb2xwM
 const SUPABASE_URL = '';
 const SUPABASE_ANON_KEY = '';
 
-const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+// RENAMED to supabaseClient to prevent crashing with the CDN
+const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
@@ -56,13 +57,10 @@ const state = {
 
 // ---------------------------------------------------------------------------
 // Database: Supabase (shared, cross-device) with an IndexedDB cache
-// (instant paint on load, and a fallback when there is no backend or no
-// network). Everything else in the app only ever talks to the DB object
-// below, so it doesn't need to know which backend is actually in use.
 // ---------------------------------------------------------------------------
 function toRow(r) {
     return {
-        ulpin: r.ulpin, lng: r.lng, lat: r.lat,
+        ulpin: r.ulpin, floor_ulpins: r.floorUlpins, lng: r.lng, lat: r.lat,
         height_m: r.heightM, min_height_m: r.minHeightM, depth_m: r.depthM,
         floors_above: r.floorsAbove, floors_below: r.floorsBelow,
         footprint_m2: r.footprintM2, volume_m3: r.volumeM3,
@@ -74,7 +72,7 @@ function toRow(r) {
 
 function fromRow(row) {
     return {
-        v: 1, ulpin: row.ulpin, lng: row.lng, lat: row.lat,
+        v: 1, ulpin: row.ulpin, floorUlpins: row.floor_ulpins || {}, lng: row.lng, lat: row.lat,
         heightM: row.height_m, minHeightM: row.min_height_m, depthM: row.depth_m,
         floorsAbove: row.floors_above, floorsBelow: row.floors_below,
         footprintM2: row.footprint_m2, volumeM3: row.volume_m3,
@@ -120,14 +118,14 @@ const Cache = (() => {
 
 const DB = (() => {
     const mem = new Map();
-    let backend = 'local';   // 'cloud' once a Supabase load has succeeded at least once
+    let backend = 'local';
     let pending = 0;
     let onChange = () => {};
 
     async function pullFromCloud() {
-        if (!supabase) return false;
+        if (!supabaseClient) return false;
         try {
-            const { data, error } = await supabase.from('parcels').select('*').order('last_viewed', { ascending: false }).limit(5000);
+            const { data, error } = await supabaseClient.from('parcels').select('*').order('last_viewed', { ascending: false }).limit(5000);
             if (error) throw error;
             mem.clear();
             data.forEach((row) => mem.set(row.ulpin, fromRow(row)));
@@ -142,10 +140,10 @@ const DB = (() => {
     async function load() {
         await Cache.open();
         const cached = await Cache.all();
-        cached.forEach((r) => mem.set(r.ulpin, r));   // instant paint, even before the network answers
+        cached.forEach((r) => mem.set(r.ulpin, r));
         const gotCloud = await pullFromCloud();
-        if (!gotCloud && !supabase) backend = 'local';
-        if (!gotCloud && supabase) backend = 'offline'; // configured, but unreachable right now
+        if (!gotCloud && !supabaseClient) backend = 'local';
+        if (!gotCloud && supabaseClient) backend = 'offline';
         onChange();
     }
 
@@ -158,7 +156,7 @@ const DB = (() => {
     return {
         load,
         onSync(fn) { onChange = fn; },
-        mode: () => backend,          // 'cloud' | 'local' | 'offline'
+        mode: () => backend,
         pendingWrites: () => pending,
         get: (u) => mem.get(u),
         all: () => Array.from(mem.values()),
@@ -167,39 +165,35 @@ const DB = (() => {
         put(rec) {
             mem.set(rec.ulpin, rec);
             Cache.put(rec);
-            if (supabase) trackWrite(supabase.from('parcels').upsert(toRow(rec)).then(({ error }) => { if (error) backend = 'offline'; }));
+            if (supabaseClient) trackWrite(supabaseClient.from('parcels').upsert(toRow(rec)).then(({ error }) => { if (error) backend = 'offline'; }));
         },
         putMany(recs) {
             recs.forEach((r) => mem.set(r.ulpin, r));
             Cache.putMany(recs);
-            if (supabase && recs.length) {
+            if (supabaseClient && recs.length) {
                 const chunks = [];
                 for (let i = 0; i < recs.length; i += 200) chunks.push(recs.slice(i, i + 200));
-                chunks.forEach((c) => trackWrite(supabase.from('parcels').upsert(c.map(toRow)).then(({ error }) => { if (error) backend = 'offline'; })));
+                chunks.forEach((c) => trackWrite(supabaseClient.from('parcels').upsert(c.map(toRow)).then(({ error }) => { if (error) backend = 'offline'; })));
             }
         },
         del(u) {
             mem.delete(u);
             Cache.del(u);
-            if (supabase) trackWrite(supabase.from('parcels').delete().eq('ulpin', u).then(({ error }) => { if (error) backend = 'offline'; }));
+            if (supabaseClient) trackWrite(supabaseClient.from('parcels').delete().eq('ulpin', u).then(({ error }) => { if (error) backend = 'offline'; }));
         },
         clear() {
             const ids = Array.from(mem.keys());
             mem.clear();
             Cache.clear();
-            if (supabase && ids.length) trackWrite(supabase.from('parcels').delete().in('ulpin', ids).then(({ error }) => { if (error) backend = 'offline'; }));
+            if (supabaseClient && ids.length) trackWrite(supabaseClient.from('parcels').delete().in('ulpin', ids).then(({ error }) => { if (error) backend = 'offline'; }));
         },
-
-        // Merge a row that arrived over realtime from someone else's tab.
         applyRemote(row) { mem.set(row.ulpin, fromRow(row)); Cache.put(fromRow(row)); },
         removeRemote(ulpin) { mem.delete(ulpin); Cache.del(ulpin); }
     };
 })();
 
-// Live updates: when someone else scans or edits a parcel, reflect it here
-// without a manual refresh.
-if (supabase) {
-    supabase
+if (supabaseClient) {
+    supabaseClient
         .channel('parcels-live')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'parcels' }, (payload) => {
             if (payload.eventType === 'DELETE') DB.removeRemote(payload.old.ulpin);
@@ -219,7 +213,7 @@ if (supabase) {
 const map = new mapboxgl.Map({
     container: 'map',
     style: STYLES.light.url,
-    center: [80.9462, 26.8467], // Lucknow
+    center: [80.9462, 26.8467],
     zoom: 16,
     pitch: 55,
     bearing: -17.6,
@@ -248,7 +242,6 @@ map.on('error', (e) => {
     if (status === 401 || status === 403) $('map-error').hidden = false;
 });
 
-// Runs on first load and again after every style switch.
 function addLayers() {
     if (!map.getSource('composite')) return;
 
@@ -274,7 +267,6 @@ function addLayers() {
         }, labelLayerId);
     }
 
-    // Parcels already in the registry get a thin teal outline on the ground.
     if (!map.getSource('registry-parcels')) map.addSource('registry-parcels', { type: 'geojson', data: registryCollection() });
     if (!map.getLayer('registry-outline')) {
         map.addLayer({
@@ -290,8 +282,6 @@ function addLayers() {
         }, labelLayerId);
     }
 
-    // The selected parcel and floor live in their own GeoJSON sources, so
-    // highlighting works even when Mapbox building features have no id.
     if (!map.getSource('selected-parcel')) map.addSource('selected-parcel', { type: 'geojson', data: selectionCollection() });
     if (!map.getSource('selected-floor')) map.addSource('selected-floor', { type: 'geojson', data: floorCollection() });
 
@@ -353,7 +343,6 @@ function bboxOf(geom) {
     return [minX, minY, maxX, maxY];
 }
 
-// Footprint area in m2 (local equirectangular projection, fine at building scale).
 function areaM2(geom) {
     const [minX, minY, maxX, maxY] = bboxOf(geom);
     const kx = 111320 * Math.cos(((minY + maxY) / 2) * Math.PI / 180);
@@ -367,7 +356,7 @@ function areaM2(geom) {
             a += xk * yj - xj * yk;
         }
         a = Math.abs(a) / 2;
-        total += i === 0 ? a : -a; // inner rings are courtyards
+        total += i === 0 ? a : -a; 
     }));
     return Math.max(total, 0);
 }
@@ -393,7 +382,6 @@ function mulberry32(seed) {
 
 function formatUlpin(u) { return u.replace(/(.{4})/g, '$1 ').trim(); }
 
-// The same building position always produces the same ULPIN.
 function buildRecord(feature) {
     const geom = JSON.parse(JSON.stringify(feature.geometry));
     const [minX, minY, maxX, maxY] = bboxOf(geom);
@@ -415,10 +403,21 @@ function buildRecord(feature) {
 
     let digits = '';
     for (let i = 0; i < 12; i++) digits += Math.floor(rng() * 10);
+    const baseUlpin = STATE_CODE + digits;
+
+    const floorUlpins = {};
+    for (let k = -basements; k <= floorsAbove; k++) {
+        if (k === 0) continue;
+        const fRng = mulberry32(hashString(`${lng.toFixed(4)}|${lat.toFixed(4)}|floor${k}`));
+        let fDigits = '';
+        for (let i = 0; i < 12; i++) fDigits += Math.floor(fRng() * 10);
+        floorUlpins[k] = STATE_CODE + fDigits;
+    }
 
     return {
         v: 1,
-        ulpin: STATE_CODE + digits,
+        ulpin: baseUlpin,
+        floorUlpins, 
         lng, lat,
         heightM, minHeightM, depthM,
         floorsAbove, floorsBelow: basements,
@@ -430,7 +429,6 @@ function buildRecord(feature) {
     };
 }
 
-// Combine a freshly computed record with whatever the database already knows.
 function mergeRecord(fresh, existing, source) {
     if (existing) {
         return Object.assign({}, fresh, {
@@ -449,12 +447,11 @@ function mergeRecord(fresh, existing, source) {
     });
 }
 
-// Per-floor details (simulated, but stable for a given ULPIN and floor).
 function floorList(rec) {
     const list = [];
     for (let k = rec.floorsBelow; k >= 1; k--) list.push(-k);
     for (let f = 1; f <= rec.floorsAbove; f++) list.push(f);
-    return list; // bottom to top
+    return list;
 }
 
 function floorLabel(f) { return f < 0 ? `Basement ${-f}` : `Floor ${f}`; }
@@ -548,6 +545,18 @@ function clearSelection() {
     refreshRegistryUI();
 }
 
+function updateUlpinDisplay() {
+    const rec = state.selected;
+    const ulpinEl = $('ulpin-display');
+    if (!rec) return;
+
+    if (state.floor !== null && rec.floorUlpins && rec.floorUlpins[state.floor]) {
+        ulpinEl.innerHTML = `${formatUlpin(rec.floorUlpins[state.floor])} <span style="font-size: 14px; color: var(--muted); font-family: var(--font-ui);">(${floorCode(state.floor)})</span>`;
+    } else {
+        ulpinEl.textContent = formatUlpin(rec.ulpin);
+    }
+}
+
 function setFloor(f) {
     if (!state.selected) return;
     const valid = floorList(state.selected);
@@ -555,6 +564,7 @@ function setFloor(f) {
     syncMapSelection();
     renderStrip(state.selected);
     renderFloor();
+    updateUlpinDisplay();
 }
 
 function locate(rec, floor = null) {
@@ -577,7 +587,6 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.selected && !$('registry-dialog').open) clearSelection();
 });
 
-// Index every building currently visible into the registry.
 function scanView() {
     if (!map.getLayer('buildings-3d')) return;
     if (map.getZoom() < 15) { toast('Zoom in to level 15 or closer, then scan.'); return; }
@@ -653,7 +662,6 @@ async function flyToPlace(query) {
 // ---------------------------------------------------------------------------
 const NUM_WORDS = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
 
-// "zero nine double one" -> "09 11"
 function wordsToDigits(text) {
     const parts = text.toLowerCase().replace(/[,.\-]/g, ' ').split(/\s+/).filter(Boolean);
     const out = [];
@@ -669,7 +677,6 @@ function wordsToDigits(text) {
     return out.join(' ');
 }
 
-// Accepts "0912 3456 7890 12", "09123456789012 F5", "...12 floor 5", "...12 B1", "...12-05".
 function parseLookup(raw) {
     let text = wordsToDigits(raw);
     let floor = null;
@@ -731,21 +738,37 @@ function lookup(raw) {
     }
 
     if (digits.length === 14) {
-        const rec = DB.get(digits);
+        let foundFloor = null;
+        let rec = DB.get(digits);
+
+        if (!rec) {
+            rec = DB.all().find(r => r.floorUlpins && Object.values(r.floorUlpins).includes(digits));
+            if (rec) {
+                foundFloor = parseInt(Object.keys(rec.floorUlpins).find(k => rec.floorUlpins[k] === digits), 10);
+            }
+        }
+
         if (!rec) {
             showLookupMsg(`ULPIN ${formatUlpin(digits)} is not in the registry yet. Fly to the area and`, 'error', true);
             return false;
         }
-        const sel = locate(rec, floor);
-        if (floor !== null && !floorList(sel).includes(floor)) {
-            showLookupMsg(`Found the building, but it has no ${floorLabel(floor).toLowerCase()}. It has ${sel.floorsAbove} floors above ground and ${sel.floorsBelow} basement level${sel.floorsBelow === 1 ? '' : 's'}.`, 'error');
+
+        const selFloor = foundFloor !== null ? foundFloor : floor;
+        const sel = locate(rec, selFloor);
+
+        if (selFloor !== null && !floorList(sel).includes(selFloor)) {
+            showLookupMsg(`Found the building, but it has no ${floorLabel(selFloor).toLowerCase()}.`, 'error');
         } else {
-            showLookupMsg(floor !== null ? `Found ${floorLabel(floor).toLowerCase()} of ${formatUlpin(digits)}.` : `Found ${formatUlpin(digits)}.`);
+            showLookupMsg(selFloor !== null ? `Found ${floorLabel(selFloor).toLowerCase()} of property.` : `Found property.`);
         }
         return true;
     }
 
-    const matches = DB.all().filter((r) => r.ulpin.includes(digits)).slice(0, 6);
+    const matches = DB.all().filter((r) => 
+        r.ulpin.includes(digits) || 
+        (r.floorUlpins && Object.values(r.floorUlpins).some(fu => fu.includes(digits)))
+    ).slice(0, 6);
+    
     if (!matches.length) {
         showLookupMsg(`No registry entries contain ${digits}.`, 'error', true);
         return false;
@@ -865,7 +888,7 @@ function renderRecord() {
         return;
     }
 
-    ulpinEl.textContent = formatUlpin(rec.ulpin);
+    updateUlpinDisplay();
     ulpinEl.classList.remove('is-empty');
     ulpinEl.classList.add('flash');
     requestAnimationFrame(() => requestAnimationFrame(() => ulpinEl.classList.remove('flash')));
@@ -876,8 +899,7 @@ function renderRecord() {
     renderFloorSelect(rec);
     renderFloor();
 
-    $('sp-place').textContent = rec.place || '-';
-    $('sp-footprint').textContent = `${nf.format(rec.footprintM2)} m\u00B2`;
+    $('sp-place').textContent = rec.place \vert{}\vert{} '-';$('sp-footprint').textContent = `${nf.format(rec.footprintM2)} m\u00B2`;
     $('sp-height').textContent = `${nf1.format(rec.heightM)} m`;
     $('sp-depth').textContent = rec.depthM ? `${rec.depthM} m` : 'None';
     $('sp-floors').textContent = `${rec.floorsAbove} above, ${rec.floorsBelow} below`;
@@ -904,13 +926,12 @@ $('floor-select').addEventListener('change', (e) => setFloor(e.target.value === 
 function stepFloor(dir) {
     const rec = state.selected;
     if (!rec) return;
-    const list = floorList(rec); // bottom to top
+    const list = floorList(rec);
     if (state.floor === null) { setFloor(list.includes(1) ? 1 : list[0]); return; }
     const i = list.indexOf(state.floor) + dir;
     if (i >= 0 && i < list.length) setFloor(list[i]);
 }
-$('floor-up').addEventListener('click', () => stepFloor(1));
-$('floor-down').addEventListener('click', () => stepFloor(-1));
+$('floor-up').addEventListener('click', () => stepFloor(1));$('floor-down').addEventListener('click', () => stepFloor(-1));
 
 // Note, star, copy ---------------------------------------------------------
 const saveNote = debounce(() => {
@@ -926,8 +947,7 @@ $('star-btn').addEventListener('click', () => {
     if (!r) return;
     r.starred = !r.starred;
     DB.put(r);
-    $('star-btn').setAttribute('aria-pressed', String(r.starred));
-    $('star-btn').textContent = r.starred ? 'Starred' : 'Star';
+    $('star-btn').setAttribute('aria-pressed', String(r.starred));$('star-btn').textContent = r.starred ? 'Starred' : 'Star';
     refreshRegistryUI();
 });
 
@@ -940,7 +960,8 @@ async function copyText(text, btn, doneLabel) {
 
 function exportShape(r) {
     return {
-        ulpin: r.ulpin,
+        buildingUlpin: r.ulpin,
+        floorUlpins: r.floorUlpins || {},
         place: r.place || null,
         centroid: { x: +r.lng.toFixed(5), y: +r.lat.toFixed(5) },
         heightAboveGroundM: r.heightM,
@@ -956,11 +977,15 @@ function exportShape(r) {
     };
 }
 
-$('copy-ulpin').addEventListener('click', (e) => { if (state.selected) copyText(state.selected.ulpin, e.currentTarget, 'Copied'); });
-$('copy-record').addEventListener('click', (e) => {
-    if (state.selected) copyText(JSON.stringify(exportShape(state.selected), null, 2), e.currentTarget, 'Copied');
+$('copy-ulpin').addEventListener('click', (e) => { 
+    if (!state.selected) return;
+    const textToCopy = (state.floor !== null && state.selected.floorUlpins && state.selected.floorUlpins[state.floor]) 
+        ? state.selected.floorUlpins[state.floor] 
+        : state.selected.ulpin;
+    copyText(textToCopy, e.currentTarget, 'Copied');
 });
-$('clear-btn').addEventListener('click', clearSelection);
+
+$('copy-record').addEventListener('click', (e) => {     if (state.selected) copyText(JSON.stringify(exportShape(state.selected), null, 2), e.currentTarget, 'Copied'); });$('clear-btn').addEventListener('click', clearSelection);
 
 // Map style switcher -------------------------------------------------------
 document.querySelectorAll('.style-switch button').forEach((btn) => {
@@ -972,7 +997,7 @@ function setMapStyle(key) {
     state.styleKey = key;
     document.querySelectorAll('.style-switch button').forEach((b) =>
         b.setAttribute('aria-pressed', String(b.dataset.style === key)));
-    map.setStyle(STYLES[key].url); // style.load re-adds our layers
+    map.setStyle(STYLES[key].url);
 }
 
 $('scan-btn').addEventListener('click', scanView);
@@ -1047,11 +1072,9 @@ function renderRegistryTable() {
     });
 }
 
-$('open-registry').addEventListener('click', () => { renderRegistryTable(); dlg.showModal(); });
-$('registry-close').addEventListener('click', () => dlg.close());
+$('open-registry').addEventListener('click', () => { renderRegistryTable(); dlg.showModal(); });$('registry-close').addEventListener('click', () => dlg.close());
 dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
-$('registry-filter').addEventListener('input', renderRegistryTable);
-$('registry-starred').addEventListener('change', renderRegistryTable);
+$('registry-filter').addEventListener('input', renderRegistryTable);$('registry-starred').addEventListener('change', renderRegistryTable);
 
 $('registry-body').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-act]');
@@ -1203,7 +1226,6 @@ function routeVoice(ctx, text) {
     handleCommand(text);
 }
 
-// Global voice commands: ULPINs, floors, styles, registry, or a place name.
 function handleCommand(text) {
     const t = text.toLowerCase().trim();
     const spoken = wordsToDigits(t);
@@ -1239,8 +1261,7 @@ function handleCommand(text) {
 }
 
 $('mic-global').addEventListener('click', (e) => startVoice('global', e.currentTarget));
-$('mic-lookup').addEventListener('click', (e) => startVoice('lookup', e.currentTarget));
-$('mic-assistant').addEventListener('click', (e) => startVoice('assistant', e.currentTarget));
+$('mic-lookup').addEventListener('click', (e) => startVoice('lookup', e.currentTarget));$('mic-assistant').addEventListener('click', (e) => startVoice('assistant', e.currentTarget));
 
 function renderVoiceLang() {
     const hi = state.voiceLang === 'hi-IN';
@@ -1299,9 +1320,10 @@ function answer(question, r) {
         }
         setFloor(f);
         const info = floorInfo(r, f);
-        return `${floorLabel(f)} of ULPIN ${id}: ${info.use.toLowerCase()}, about ${nf(info.area)} m\u00B2` +
+        const fUlpin = (r.floorUlpins && r.floorUlpins[f]) ? formatUlpin(r.floorUlpins[f]) : id;
+        return `${floorLabel(f)} has its own unique ULPIN: ${fUlpin}. It is ${info.use.toLowerCase()}, about ${nf(info.area)} m\u00B2` +
             (info.units ? `, roughly ${info.units} unit${info.units === 1 ? '' : 's'}` : '') +
-            `. Unit reference ${info.ref}. It is now highlighted on the map.`;
+            `. It is now highlighted on the map.`;
     }
 
     if (has('registry', 'database', 'indexed', 'how many parcels')) {
@@ -1349,7 +1371,6 @@ function ask(question) {
     appendMessage('user', text);
     aiInput.value = '';
 
-    // A spoken or typed ULPIN goes straight to lookup.
     const parsed = parseLookup(text);
     if (parsed.digits.length === 14) {
         const found = lookup(text);
@@ -1370,8 +1391,7 @@ function ask(question) {
     }, 450);
 }
 
-$('ai-form').addEventListener('submit', (e) => { e.preventDefault(); ask(aiInput.value); });
-$('chips').addEventListener('click', (e) => {
+$('ai-form').addEventListener('submit', (e) => { e.preventDefault(); ask(aiInput.value); });$('chips').addEventListener('click', (e) => {
     const chip = e.target.closest('button[data-q]');
     if (chip) ask(chip.dataset.q);
 });
@@ -1398,5 +1418,5 @@ renderRecord();
 DB.onSync(() => refreshRegistryUI());
 DB.load().then(() => {
     refreshRegistryUI();
-    if (supabase && DB.mode() !== 'cloud') toast('Could not reach the shared registry. Working from this device\u2019s cache instead.');
+    if (supabaseClient && DB.mode() !== 'cloud') toast('Could not reach the shared registry. Working from this device\u2019s cache instead.');
 });
