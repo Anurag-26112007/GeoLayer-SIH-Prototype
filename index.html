@@ -4,82 +4,236 @@
     <meta name="google-site-verification" content="GmQEdUmcqpVckcomYBInOWSy4NXnUSwhCBe0A42be30" />
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="GeoLayer 3D turns any building on the map into a volumetric parcel record with a 14-digit ULPIN. Search by voice, look up a ULPIN, and find the exact floor.">
     <title>GeoLayer 3D - ULPIN Generator</title>
-    
-    <!-- Mapbox & Tailwind External Libraries -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
-    <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
-    
-    <!-- Mapbox Geocoder Plugin (Search Bar) -->
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
     <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
     <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css" type="text/css">
-    
-    <!-- Your Custom CSS File -->
+
+    <!-- Supabase client (shared backend for the parcel registry) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="bg-gray-900 h-screen flex flex-col">
-    <!-- Navbar -->
-    <nav class="bg-slate-900/90 backdrop-blur-md text-white p-4 border-b border-slate-700 flex justify-between items-center z-10 shadow-lg relative">
-        <div class="flex items-center gap-3">
-            <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/50">GL</div>
-            <h1 class="text-xl font-bold tracking-wide">GeoLayer 3D <span class="text-blue-400 text-xs ml-2 uppercase tracking-wider">SIH26011</span></h1>
-        </div>
-        <div class="bg-slate-800 border border-slate-600 px-4 py-1.5 rounded-full text-xs font-semibold text-slate-300">
-            Dept. of Land Resources (DILRMP)
-        </div>
-    </nav>
-
-    <div class="flex flex-1 relative">
-        <div id="map" class="w-full h-full absolute inset-0"></div>
-
-        <!-- Glassmorphism Panel (Top Left) -->
-        <div class="absolute top-6 left-6 bg-white/80 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-80 z-10 border border-white/50 transition-all hover:shadow-blue-500/20 hover:-translate-y-1">
-            <div class="flex items-center gap-2 mb-2">
-                <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <h2 class="text-lg font-bold text-slate-800">3D Parcel Inspector</h2>
-            </div>
-            <p class="text-sm text-slate-600 mb-5 leading-relaxed">Select any building geometry to calculate volumetric data and generate a 14-digit ULPIN.</p>
-            
-            <div class="bg-slate-50/80 p-4 rounded-xl border border-slate-200 mb-4 shadow-inner">
-                <p class="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Spatial Data (X, Y, Z)</p>
-                <p id="coord-display" class="text-sm text-slate-700 font-mono leading-relaxed">Awaiting selection...</p>
-            </div>
-
-            <div class="bg-blue-50/80 p-4 rounded-xl border border-blue-200 shadow-inner">
-                <p class="text-[10px] text-blue-600 uppercase font-bold tracking-wider mb-1">14-Digit 3D ULPIN</p>
-                <p id="ulpin-display" class="text-lg text-blue-700 font-mono font-bold tracking-widest transition-colors duration-300">---- ---- ----</p>
-            </div>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+                <path d="M16 3 29 10 16 17 3 10Z" fill="#f26a1b"/>
+                <path d="M3 15.5 16 22.5 29 15.5" fill="none" stroke="#f4f6f3" stroke-width="2.4" stroke-linejoin="round"/>
+                <path d="M3 21 16 28 29 21" fill="none" stroke="#f4f6f3" stroke-width="2.4" stroke-linejoin="round" opacity=".55"/>
+            </svg>
+            <h1>GeoLayer 3D</h1>
+            <span class="brand-sub">SIH26011</span>
         </div>
 
-        <!-- Team Watermark (Bottom Left) -->
-        <div class="absolute bottom-6 left-6 bg-slate-900/90 backdrop-blur-xl text-white px-4 py-3 rounded-xl z-10 border border-slate-700 shadow-2xl flex items-center gap-2 text-xs">
-            <div class="w-2 h-2 bg-green-400 rounded-full animate-ping"></div>
-            <div>
-                <span class="text-slate-400">Created by:</span> 
-                <span class="font-bold tracking-wide text-blue-400">TEAM :  THE-DEBUGGERS</span>
-                <span class="text-slate-500 mx-1">|</span>
-                <span class="text-slate-400">Updated: 17 Sep 2026</span>
-            </div>
+        <div class="search-row">
+            <div id="geocoder" class="geocoder-slot"></div>
+            <button id="mic-global" class="mic" type="button" aria-label="Search by voice" title="Search by voice">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+            <button id="voice-lang" class="lang" type="button" title="Voice language" aria-label="Voice language: English">EN</button>
         </div>
 
-        <!-- AI Assistant Panel (Bottom Right) -->
-        <div class="absolute bottom-6 right-6 bg-white/90 backdrop-blur-xl rounded-2xl shadow-2xl w-80 z-10 border border-white/50 flex flex-col overflow-hidden transition-all hover:shadow-purple-500/20">
-            <div class="bg-slate-900 p-3 text-white flex justify-between items-center">
-                <span class="font-semibold text-sm flex items-center gap-2">
-                    <span class="text-purple-400">✨</span> Land Records Assistant
-                </span>
+        <div class="top-actions">
+            <button id="open-registry" class="topbtn" type="button">Registry <span id="registry-count" class="count">0</span></button>
+            <span class="dept">Dept. of Land Resources (DILRMP)</span>
+        </div>
+    </header>
+
+    <div class="stage">
+        <aside class="inspector" aria-label="Parcel inspector">
+            <div class="insp-head">
+                <h2>Parcel inspector</h2>
+                <span class="sim-tag" title="Heights come from map data. Basements, floor use, status and owner are generated for the demo.">Simulated records</span>
             </div>
-            <div id="chat-history" class="h-48 p-4 overflow-y-auto text-sm text-slate-700 space-y-3 bg-slate-50/50">
-                <div class="bg-slate-200/70 p-2 rounded-lg rounded-tl-none w-11/12">Hello! Click a building, and ask me to analyze its ULPIN or property details.</div>
+
+            <!-- ULPIN lookup -->
+            <section class="block">
+                <form id="lookup-form" autocomplete="off">
+                    <label for="lookup-input" class="label">Find by ULPIN</label>
+                    <div class="lookup-row">
+                        <input id="lookup-input" type="text" placeholder="0912 3456 7890 12, add F5 for a floor" spellcheck="false" aria-describedby="lookup-msg">
+                        <button id="mic-lookup" class="mic mic-sm" type="button" aria-label="Say a ULPIN" title="Say a ULPIN">
+                            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </button>
+                        <button type="submit" class="btn-solid">Find</button>
+                    </div>
+                </form>
+                <p id="lookup-msg" class="lookup-msg" role="status" hidden></p>
+                <ul id="lookup-matches" class="recent" hidden></ul>
+            </section>
+
+            <section class="block">
+                <p class="label">ULPIN</p>
+                <div class="ulpin-row">
+                    <output id="ulpin-display" class="ulpin is-empty" aria-live="polite">Not assigned</output>
+                    <button id="copy-ulpin" class="btn-quiet" type="button" hidden>Copy</button>
+                </div>
+                <span id="status-pill" class="pill" hidden></span>
+            </section>
+
+            <section class="block">
+                <p class="label">Vertical section</p>
+                <svg id="strip" viewBox="0 0 300 230" role="img" aria-label="No building selected"></svg>
+                <p id="empty-hint" class="hint">Click any building on the map, say a place or a ULPIN, or use Scan this view to fill the registry.</p>
+            </section>
+
+            <div id="record-details" hidden>
+                <section class="block">
+                    <p class="label">Floor locator</p>
+                    <div class="floor-row">
+                        <button id="floor-down" class="btn-quiet step" type="button" aria-label="Go down one floor">&minus;</button>
+                        <select id="floor-select" aria-label="Floor"></select>
+                        <button id="floor-up" class="btn-quiet step" type="button" aria-label="Go up one floor">+</button>
+                    </div>
+                    <dl id="floor-specs" class="specs floor-specs" hidden>
+                        <div><dt>Use</dt><dd id="fl-use">-</dd></div>
+                        <div><dt>Elevation</dt><dd id="fl-elev">-</dd></div>
+                        <div><dt>Floor area</dt><dd id="fl-area">-</dd></div>
+                        <div><dt>Units</dt><dd id="fl-units">-</dd></div>
+                        <div><dt>Unit reference</dt><dd id="fl-ref" class="mono-dd">-</dd></div>
+                    </dl>
+                </section>
+
+                <section class="block">
+                    <dl class="specs">
+                        <div><dt>Place</dt><dd id="sp-place">-</dd></div>
+                        <div><dt>Footprint</dt><dd id="sp-footprint">-</dd></div>
+                        <div><dt>Height above ground</dt><dd id="sp-height">-</dd></div>
+                        <div><dt>Depth below ground</dt><dd id="sp-depth">-</dd></div>
+                        <div><dt>Floors</dt><dd id="sp-floors">-</dd></div>
+                        <div><dt>Enclosed volume</dt><dd id="sp-volume">-</dd></div>
+                        <div><dt>Registered to</dt><dd id="sp-owner">-</dd></div>
+                    </dl>
+                </section>
+
+                <section class="block">
+                    <p class="label">Spatial data (X, Y, Z)</p>
+                    <p id="coord-display" class="mono"></p>
+                </section>
+
+                <section class="block">
+                    <label class="label" for="note-input">Inspection note</label>
+                    <textarea id="note-input" rows="3" placeholder="Add a note. It is saved on this device."></textarea>
+                </section>
+
+                <div class="actions">
+                    <button id="copy-record" class="btn-solid" type="button">Copy record as JSON</button>
+                    <button id="star-btn" class="btn-quiet" type="button" aria-pressed="false">Star</button>
+                    <button id="clear-btn" class="btn-quiet" type="button">Clear selection</button>
+                </div>
             </div>
-            <div class="p-3 border-t border-slate-200 bg-white flex gap-2">
-                <input type="text" id="ai-input" placeholder="Ask about this property..." class="flex-1 bg-slate-100 text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-400 border border-slate-200 transition-all">
-                <button id="ai-send" class="bg-slate-900 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-purple-600 transition-colors">Ask</button>
+
+            <section id="recent-wrap" class="block" hidden>
+                <p class="label">Recently inspected</p>
+                <ul id="recent-list" class="recent"></ul>
+            </section>
+
+            <footer class="credit">
+                Created by <strong>Team The-Debuggers</strong><br>
+                Updated 20 Sep 2026
+            </footer>
+        </aside>
+
+        <div class="map-wrap">
+            <div id="map"></div>
+
+            <div class="map-tools">
+                <div class="style-switch" role="group" aria-label="Map style">
+                    <button type="button" data-style="light" aria-pressed="true">Light</button>
+                    <button type="button" data-style="dark" aria-pressed="false">Dark</button>
+                    <button type="button" data-style="satellite" aria-pressed="false">Satellite</button>
+                </div>
+                <button id="scan-btn" class="tool-btn" type="button">Scan this view</button>
             </div>
+
+            <div id="voice-status" class="voice-status" role="status" aria-live="polite" hidden>
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span id="voice-text">Listening</span>
+            </div>
+
+            <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+            <div id="map-error" class="map-error" role="alert" hidden>
+                The map could not load. Check the Mapbox token and your connection, then reload.
+            </div>
+
+            <section class="assistant" id="assistant" aria-label="Land records assistant">
+                <button class="assistant-head" id="assistant-toggle" type="button" aria-expanded="true" aria-controls="assistant-body">
+                    <span>Land records assistant</span>
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div id="assistant-body" class="assistant-body">
+                    <div id="chat-history" class="chat" role="log" aria-live="polite">
+                        <div class="msg ai">Select a building, then ask about its owner, dues, disputes, floors or a specific floor. You can also type or say a ULPIN.</div>
+                    </div>
+                    <div class="chips" id="chips">
+                        <button type="button" data-q="Summary">Summary</button>
+                        <button type="button" data-q="Where is it?">Place</button>
+                        <button type="button" data-q="Who is the owner?">Owner</button>
+                        <button type="button" data-q="Any tax dues?">Tax dues</button>
+                        <button type="button" data-q="Any disputes?">Disputes</button>
+                        <button type="button" id="speak-toggle" aria-pressed="false">Read aloud</button>
+                    </div>
+                    <form id="ai-form" class="ask">
+                        <label for="ai-input" class="sr-only">Ask about this property</label>
+                        <input type="text" id="ai-input" placeholder="Ask about this property" autocomplete="off">
+                        <button id="mic-assistant" class="mic mic-sm" type="button" aria-label="Ask by voice" title="Ask by voice">
+                            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </button>
+                        <button id="ai-send" type="submit">Ask</button>
+                    </form>
+                </div>
+            </section>
         </div>
     </div>
-    
+
+    <!-- Registry (on-device database) -->
+    <dialog id="registry-dialog" class="registry" aria-labelledby="registry-title">
+        <div class="reg-head">
+            <div>
+                <h2 id="registry-title">Parcel registry</h2>
+                <p id="registry-meta" class="reg-meta"></p>
+            </div>
+            <button id="registry-close" class="btn-quiet" type="button">Close</button>
+        </div>
+        <div class="reg-tools">
+            <input id="registry-filter" type="search" placeholder="Filter by ULPIN, place or note" aria-label="Filter registry">
+            <label class="check"><input id="registry-starred" type="checkbox"> Starred only</label>
+        </div>
+        <div class="reg-table-wrap">
+            <table class="reg-table">
+                <thead>
+                    <tr>
+                        <th scope="col">ULPIN</th>
+                        <th scope="col">Place</th>
+                        <th scope="col">Floors</th>
+                        <th scope="col">Footprint</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Last viewed</th>
+                        <th scope="col"><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody id="registry-body"></tbody>
+            </table>
+            <p id="registry-empty" class="hint reg-empty" hidden></p>
+        </div>
+        <div class="reg-foot">
+            <button id="export-json" class="btn-solid" type="button">Export JSON</button>
+            <button id="export-csv" class="btn-quiet" type="button">Export CSV</button>
+            <label class="btn-quiet file-btn" for="import-file">Import JSON</label>
+            <input id="import-file" type="file" accept="application/json,.json" class="sr-only">
+            <button id="registry-clear" class="btn-quiet danger" type="button">Clear all</button>
+        </div>
+    </dialog>
+
     <script src="script.js"></script>
 </body>
 </html>
