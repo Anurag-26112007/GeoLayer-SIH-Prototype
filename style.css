@@ -278,7 +278,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .step { width: 38px; height: 34px; padding: 0; font-size: 18px; line-height: 1; }
 .floor-specs { margin-top: 10px; }
-.floor-specs[hidden] { display: none; }
 .mono-dd { font-family: var(--font-data); font-size: 12px; }
 
 /* Specs */
@@ -593,6 +592,7 @@ textarea#note-input:focus-visible { outline: 2px solid var(--stake); outline-off
 .reg-table td { padding: 8px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
 .reg-table tbody tr:hover { background: #f8faf8; }
 .reg-table .c-ulpin { font-family: var(--font-data); font-weight: 600; white-space: nowrap; }
+.reg-table .c-floor { white-space: nowrap; color: var(--ink-2); }
 .reg-table .c-place { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .reg-table .c-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .reg-table .c-act { white-space: nowrap; text-align: right; }
@@ -616,7 +616,7 @@ textarea#note-input:focus-visible { outline: 2px solid var(--stake); outline-off
     .assistant { bottom: 30px; width: 300px; }
     .chat { height: 150px; }
     .map-tools { top: 10px; left: 10px; }
-    .reg-table .c-place, .reg-table th:nth-child(2) { display: none; }
+    .reg-table .c-place, .reg-table th:nth-child(3) { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

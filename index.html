@@ -4,7 +4,7 @@
     <meta name="google-site-verification" content="GmQEdUmcqpVckcomYBInOWSy4NXnUSwhCBe0A42be30" />
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="GeoLayer 3D turns any building on the map into a volumetric parcel record with a 14-digit ULPIN. Search by voice, look up a ULPIN, and find the exact floor.">
+    <meta name="description" content="GeoLayer 3D generates a unique 14-digit ULPIN for every floor of a building, above or below ground. Search by voice, look up a ULPIN, and jump straight to the floor it belongs to.">
     <title>GeoLayer 3D - ULPIN Generator</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,9 +15,6 @@
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
     <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
     <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css" type="text/css">
-
-    <!-- Supabase client (shared backend for the parcel registry) -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -48,10 +45,10 @@
     </header>
 
     <div class="stage">
-        <aside class="inspector" aria-label="Parcel inspector">
+        <aside class="inspector" aria-label="Floor inspector">
             <div class="insp-head">
-                <h2>Parcel inspector</h2>
-                <span class="sim-tag" title="Heights come from map data. Basements, floor use, status and owner are generated for the demo.">Simulated records</span>
+                <h2>Floor inspector</h2>
+                <span class="sim-tag" title="Building heights come from map data. Floor use, owner and status are generated for the demo.">Simulated records</span>
             </div>
 
             <!-- ULPIN lookup -->
@@ -59,7 +56,7 @@
                 <form id="lookup-form" autocomplete="off">
                     <label for="lookup-input" class="label">Find by ULPIN</label>
                     <div class="lookup-row">
-                        <input id="lookup-input" type="text" placeholder="0912 3456 7890 12, add F5 for a floor" spellcheck="false" aria-describedby="lookup-msg">
+                        <input id="lookup-input" type="text" placeholder="0912 3456 7890 12" spellcheck="false" aria-describedby="lookup-msg">
                         <button id="mic-lookup" class="mic mic-sm" type="button" aria-label="Say a ULPIN" title="Say a ULPIN">
                             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                         </button>
@@ -71,7 +68,7 @@
             </section>
 
             <section class="block">
-                <p class="label">ULPIN</p>
+                <p class="label">ULPIN of this floor</p>
                 <div class="ulpin-row">
                     <output id="ulpin-display" class="ulpin is-empty" aria-live="polite">Not assigned</output>
                     <button id="copy-ulpin" class="btn-quiet" type="button" hidden>Copy</button>
@@ -82,35 +79,34 @@
             <section class="block">
                 <p class="label">Vertical section</p>
                 <svg id="strip" viewBox="0 0 300 230" role="img" aria-label="No building selected"></svg>
-                <p id="empty-hint" class="hint">Click any building on the map, say a place or a ULPIN, or use Scan this view to fill the registry.</p>
+                <p id="empty-hint" class="hint">Click any building, say a place or a ULPIN, or use Scan this view. Every floor, above or below ground, gets its own ULPIN — even a single-floor building gets one.</p>
             </section>
 
             <div id="record-details" hidden>
                 <section class="block">
-                    <p class="label">Floor locator</p>
+                    <p class="label">This floor</p>
                     <div class="floor-row">
                         <button id="floor-down" class="btn-quiet step" type="button" aria-label="Go down one floor">&minus;</button>
                         <select id="floor-select" aria-label="Floor"></select>
                         <button id="floor-up" class="btn-quiet step" type="button" aria-label="Go up one floor">+</button>
                     </div>
-                    <dl id="floor-specs" class="specs floor-specs" hidden>
+                    <dl class="specs floor-specs">
                         <div><dt>Use</dt><dd id="fl-use">-</dd></div>
                         <div><dt>Elevation</dt><dd id="fl-elev">-</dd></div>
                         <div><dt>Floor area</dt><dd id="fl-area">-</dd></div>
-                        <div><dt>Units</dt><dd id="fl-units">-</dd></div>
-                        <div><dt>Unit reference</dt><dd id="fl-ref" class="mono-dd">-</dd></div>
+                        <div><dt>Approx. units</dt><dd id="fl-units">-</dd></div>
+                        <div><dt>Registered to</dt><dd id="sp-owner">-</dd></div>
                     </dl>
                 </section>
 
                 <section class="block">
+                    <p class="label">Building</p>
                     <dl class="specs">
                         <div><dt>Place</dt><dd id="sp-place">-</dd></div>
+                        <div><dt>Total floors</dt><dd id="sp-floors">-</dd></div>
+                        <div><dt>Building height</dt><dd id="sp-height">-</dd></div>
                         <div><dt>Footprint</dt><dd id="sp-footprint">-</dd></div>
-                        <div><dt>Height above ground</dt><dd id="sp-height">-</dd></div>
-                        <div><dt>Depth below ground</dt><dd id="sp-depth">-</dd></div>
-                        <div><dt>Floors</dt><dd id="sp-floors">-</dd></div>
-                        <div><dt>Enclosed volume</dt><dd id="sp-volume">-</dd></div>
-                        <div><dt>Registered to</dt><dd id="sp-owner">-</dd></div>
+                        <div><dt>Envelope volume</dt><dd id="sp-volume">-</dd></div>
                     </dl>
                 </section>
 
@@ -121,7 +117,7 @@
 
                 <section class="block">
                     <label class="label" for="note-input">Inspection note</label>
-                    <textarea id="note-input" rows="3" placeholder="Add a note. It is saved on this device."></textarea>
+                    <textarea id="note-input" rows="3" placeholder="Add a note for this floor. Saved on this device."></textarea>
                 </section>
 
                 <div class="actions">
@@ -138,7 +134,7 @@
 
             <footer class="credit">
                 Created by <strong>Team The-Debuggers</strong><br>
-                Updated 20 Sep 2026
+                Updated 24 Sep 2026
             </footer>
         </aside>
 
@@ -172,7 +168,7 @@
                 </button>
                 <div id="assistant-body" class="assistant-body">
                     <div id="chat-history" class="chat" role="log" aria-live="polite">
-                        <div class="msg ai">Select a building, then ask about its owner, dues, disputes, floors or a specific floor. You can also type or say a ULPIN.</div>
+                        <div class="msg ai">Select a building, then ask about a floor — for example "floor 3" or "basement 1" — and I'll show that floor's own ULPIN. You can also type or say a ULPIN directly.</div>
                     </div>
                     <div class="chips" id="chips">
                         <button type="button" data-q="Summary">Summary</button>
@@ -199,7 +195,7 @@
     <dialog id="registry-dialog" class="registry" aria-labelledby="registry-title">
         <div class="reg-head">
             <div>
-                <h2 id="registry-title">Parcel registry</h2>
+                <h2 id="registry-title">Floor registry</h2>
                 <p id="registry-meta" class="reg-meta"></p>
             </div>
             <button id="registry-close" class="btn-quiet" type="button">Close</button>
@@ -213,9 +209,8 @@
                 <thead>
                     <tr>
                         <th scope="col">ULPIN</th>
+                        <th scope="col">Floor</th>
                         <th scope="col">Place</th>
-                        <th scope="col">Floors</th>
-                        <th scope="col">Footprint</th>
                         <th scope="col">Status</th>
                         <th scope="col">Last viewed</th>
                         <th scope="col"><span class="sr-only">Actions</span></th>
